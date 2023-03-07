@@ -1,7 +1,7 @@
 import '../styles/Tabs.css';
 import React, { useState } from 'react';
 
-import { SlIcon, SlBadge, SlSpinner } from "@shoelace-style/shoelace/dist/react";
+import { SlIcon, SlSpinner } from "@shoelace-style/shoelace/dist/react";
 
 export function TabList ({ children, html, css, js, loadingResponse }) {
 	const [activeTab, setActiveTab] = useState(children[0].key);
