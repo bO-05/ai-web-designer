@@ -7,20 +7,30 @@ class AI {
     static _OpenAIClient = null;
     static _totalUsedTokens = 0;
 
-    static _initOpenAIClient() {
-        if (AI._config) return;
-
-        if (!process.env.REACT_APP_OPENAI_API_KEY) {
-            throw new Error("OpenAI API key not set");
-        }
-
+    static initWithKey(key) {
         AI._config = new Configuration({
-			apiKey: process.env.REACT_APP_OPENAI_API_KEY,
-		});
-        
+            apiKey: key,
+        });
         AI._OpenAIClient = new OpenAIApi(AI._config);
-
         AI._totalUsedTokens = 0;
+    }
+
+    static get isInitialized() {
+        return AI._config && AI._OpenAIClient;
+    }
+
+    static async checkAPIKey(key) {
+        const config = new Configuration({
+            apiKey: key,
+        });
+        try {
+            const OpenAIClient = new OpenAIApi(config);
+            await OpenAIClient.listModels();
+            return true;
+        }
+        catch (e) {
+            return false;
+        }
     }
 
     static get totalUsedTokens() {
@@ -32,20 +42,25 @@ class AI {
     }
 
     static async getResponseMessage(messages) {
-        AI._initOpenAIClient();
+        if (!AI._config || !AI._OpenAIClient) {
+            console.error("AI not initialized");
+            return new ChatMessage("system", "The API key is not valid.");
+        }
 
         const guidelines = [
             "You are a bot that can generate HTML, CSS and JS code.",
             "You will receive messages from the user containing a JSON object. This object will contain the following fields:",
             "- text: The text message from the user",
-            "- html: The full HTML code of the user's webpage",
+            "- html: The HTML code of the user's webpage inside the <body> tag",
             "- css: The full CSS code of the user's webpage",
             "- js: The full JavaScript code of the user's webpage",
             "You will reply to the user with another JSON object **and nothing more**.",
             "You will add the 'html', 'css' and 'js' fields only if you changed them. When adding any code field, format it in a readable way.",
+            "You can only edit the <body> tag of the HTML code, so everything else should be left as it is.",
+            "Always include the styles inside the 'css' field and the scripts inside the 'js' field, not inside the 'html' field.",
             "Your response will **always** contain the 'text' field, which will be the response you send to the user.",
-            "Your response will **never** contain just a text message, it will always contain a JSON object.",
-            "If the latest message is from the assistant with an incomplete JSON object, you will **only** reply with the rest of the JSON object and nothing more.",
+            "Your response will **never** contain just a text message, it will always contain a JSON object and nothing more.",
+            "**Do not** add any notes or additional text to your response other than the JSON itself, not even before or after the JSON.",
         ];
 
         const prompt_and_examples = [
@@ -74,7 +89,7 @@ class AI {
             {
                 role: "assistant",
                 content: JSON.stringify({
-                    html: "<h1>Hello world!</h1>",
+                    html: "<h1>\n\tHello world!\n</h1>",
                     text: "Sure, I added the title for you. Do you want to add anything else?",
                 })
             },
@@ -105,10 +120,10 @@ class AI {
 
             if (message.role === "system") continue;
 
-            if (message.role === "user") {
+            if (message.role === "user" && message !== messages[messages.length - 1]) {
                 message_json = {
-                    text: message.message,
-                }
+                    text: message.message
+                };
             }
 
             if (message.role === "assistant") {
@@ -150,12 +165,23 @@ class AI {
             }
         }
 
+        let response_text = response.data.choices[0].message.content.trim();
         let response_json = {};
         try {
-            response_json = JSON.parse(response.data.choices[0].message.content);
+            // Remove notes before and after the JSON object
+            if (response_text.includes("{") && response_text.includes("}")) {
+                response_text = response_text.substring(response_text.indexOf("{"), response_text.lastIndexOf("}") + 1);
+            }
+
+            response_json = JSON.parse(response_text);
+
         } catch (error) {
-            console.error(error);
-            return new ChatMessage("system", "The API returned an invalid response. Please try again later.");
+            
+            console.warn("The response message is not a valid JSON object. The message will be sent as a text message.")
+
+            response_json = {
+                text: response_text,
+			};
         }
 
         const newMessage = new ChatMessage(
